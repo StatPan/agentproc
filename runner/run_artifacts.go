@@ -29,6 +29,15 @@ type RunSummary struct {
 	Events       []string `json:"events,omitempty"`
 }
 
+type RunState struct {
+	RunID     string `json:"run_id"`
+	TaskID    string `json:"task_id"`
+	Status    string `json:"status"`
+	StartedAt string `json:"started_at"`
+	UpdatedAt string `json:"updated_at"`
+	PID       int    `json:"pid,omitempty"`
+}
+
 func runResultCommand(args []string) error {
 	fs := flag.NewFlagSet("result", flag.ContinueOnError)
 	rootFlag := fs.String("root", ".", "AgentOS root path")
@@ -40,11 +49,11 @@ func runResultCommand(args []string) error {
 		return errors.New("usage: aproc result [--root PATH] [--config PATH] <run-id>")
 	}
 
-	cfg, _, _, _, err := loadRuntimeConfig(*rootFlag, *configFlag)
+	_, paths, err := loadRuntimeConfig(*rootFlag, *configFlag)
 	if err != nil {
 		return err
 	}
-	summary, _, err := loadRunSummary(cfg.AgentOSRoot, fs.Arg(0))
+	summary, _, err := loadRunSummary(paths, fs.Arg(0))
 	if err != nil {
 		return err
 	}
@@ -66,11 +75,11 @@ func runTailCommand(args []string) error {
 		return errors.New("usage: aproc tail [--root PATH] [--config PATH] [--stream stdout|stderr] [--last N] <run-id>")
 	}
 
-	cfg, _, _, _, err := loadRuntimeConfig(*rootFlag, *configFlag)
+	_, paths, err := loadRuntimeConfig(*rootFlag, *configFlag)
 	if err != nil {
 		return err
 	}
-	summary, _, err := loadRunSummary(cfg.AgentOSRoot, fs.Arg(0))
+	summary, _, err := loadRunSummary(paths, fs.Arg(0))
 	if err != nil {
 		return err
 	}
@@ -93,8 +102,8 @@ func runTailCommand(args []string) error {
 	return nil
 }
 
-func prepareRunArtifacts(root, runID string) (string, string, string, string, error) {
-	runBaseDir := filepath.Join(root, "outputs", "runs", runID)
+func prepareRunArtifacts(paths *RuntimePaths, runID string) (string, string, string, string, error) {
+	runBaseDir := paths.CompletedRunDir(runID)
 	logsDir := filepath.Join(runBaseDir, "logs")
 	if err := os.MkdirAll(logsDir, 0o755); err != nil {
 		return "", "", "", "", fmt.Errorf("mkdir run logs dir: %w", err)
@@ -106,7 +115,38 @@ func prepareRunArtifacts(root, runID string) (string, string, string, string, er
 		nil
 }
 
+func writeRunState(path string, state *RunState) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("mkdir run state dir: %w", err)
+	}
+	state.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	data, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal run state: %w", err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return fmt.Errorf("write run state: %w", err)
+	}
+	return nil
+}
+
+func loadRunState(path string) (*RunState, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read run state: %w", err)
+	}
+
+	var state RunState
+	if err := json.Unmarshal(data, &state); err != nil {
+		return nil, fmt.Errorf("parse run state: %w", err)
+	}
+	return &state, nil
+}
+
 func saveRunSummary(path string, summary *RunSummary) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("mkdir run summary dir: %w", err)
+	}
 	data, err := json.MarshalIndent(summary, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal run summary: %w", err)
@@ -117,8 +157,8 @@ func saveRunSummary(path string, summary *RunSummary) error {
 	return nil
 }
 
-func loadRunSummary(root, runID string) (*RunSummary, string, error) {
-	path := filepath.Join(root, "outputs", "runs", runID, "summary.json")
+func loadRunSummary(paths *RuntimePaths, runID string) (*RunSummary, string, error) {
+	path := paths.RunSummaryPath(runID)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, "", fmt.Errorf("read run summary: %w", err)

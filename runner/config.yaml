@@ -1,9 +1,10 @@
 agentos_root: /home/statpan/workspace/agentproc
 layers:
-  process: claude
-  subprocess: claude
+  subprocess: codex
   thread: gemini
 runner:
   max_concurrent: 0
   poll_interval: 5s
   mode: daemon
+  thread_fallback_models:
+    - gemini-3.1-pro-preview

@@ -13,14 +13,14 @@ import (
 )
 
 type IntakeSession struct {
-	ID               string   `json:"id"`
-	Request          string   `json:"request"`
-	Questions        []string `json:"questions"`
-	Answers          []string `json:"answers"`
-	Status           string   `json:"status"`
-	CreatedAt        string   `json:"created_at"`
-	TaskID           string   `json:"task_id,omitempty"`
-	GeneratedTaskPath string  `json:"generated_task_path,omitempty"`
+	ID                string   `json:"id"`
+	Request           string   `json:"request"`
+	Questions         []string `json:"questions"`
+	Answers           []string `json:"answers"`
+	Status            string   `json:"status"`
+	CreatedAt         string   `json:"created_at"`
+	TaskID            string   `json:"task_id,omitempty"`
+	GeneratedTaskPath string   `json:"generated_task_path,omitempty"`
 }
 
 func runIntakeCommand(args []string) error {
@@ -36,12 +36,12 @@ func runIntakeCommand(args []string) error {
 		return errors.New("usage: aproc intake [--root PATH] [--config PATH] \"request\"")
 	}
 
-	cfg, _, _, _, err := loadRuntimeConfig(*rootFlag, *configFlag)
+	_, paths, err := loadRuntimeConfig(*rootFlag, *configFlag)
 	if err != nil {
 		return err
 	}
 
-	intakeDir := filepath.Join(cfg.AgentOSRoot, "tasks", ".intake")
+	intakeDir := paths.IntakeSessionsDir()
 	if err := os.MkdirAll(intakeDir, 0o755); err != nil {
 		return fmt.Errorf("mkdir intake dir: %w", err)
 	}
@@ -55,7 +55,7 @@ func runIntakeCommand(args []string) error {
 	}
 
 	if len(session.Questions) == 0 {
-		taskPath, taskID, err := createTaskFromIntake(cfg.AgentOSRoot, request, nil)
+		taskPath, taskID, err := createTaskFromIntake(paths, request, nil)
 		if err != nil {
 			return err
 		}
@@ -100,12 +100,12 @@ func runReplyCommand(args []string) error {
 		return errors.New("reply requires session id and answer")
 	}
 
-	cfg, _, _, _, err := loadRuntimeConfig(*rootFlag, *configFlag)
+	_, paths, err := loadRuntimeConfig(*rootFlag, *configFlag)
 	if err != nil {
 		return err
 	}
 
-	intakeDir := filepath.Join(cfg.AgentOSRoot, "tasks", ".intake")
+	intakeDir := paths.IntakeSessionsDir()
 	session, sessionPath, err := loadIntakeSession(intakeDir, sessionID)
 	if err != nil {
 		return err
@@ -128,7 +128,7 @@ func runReplyCommand(args []string) error {
 		return nil
 	}
 
-	taskPath, taskID, err := createTaskFromIntake(cfg.AgentOSRoot, session.Request, session.Answers)
+	taskPath, taskID, err := createTaskFromIntake(paths, session.Request, session.Answers)
 	if err != nil {
 		return err
 	}
@@ -205,8 +205,8 @@ func nextAutoTaskID(queueDir string) (string, error) {
 	return fmt.Sprintf("T-AUTO-%03d", maxID+1), nil
 }
 
-func createTaskFromIntake(root, request string, answers []string) (string, string, error) {
-	queueDir := filepath.Join(root, "tasks", "queue")
+func createTaskFromIntake(paths *RuntimePaths, request string, answers []string) (string, string, error) {
+	queueDir := paths.QueueDir()
 	if err := os.MkdirAll(queueDir, 0o755); err != nil {
 		return "", "", fmt.Errorf("mkdir queue dir: %w", err)
 	}
@@ -265,7 +265,7 @@ func createTaskFromIntake(root, request string, answers []string) (string, strin
 ## Retry Count: 0
 `, taskID, sanitizeSingleLine(title), defaultAssignedTo(), input, taskID)
 
-	taskPath := filepath.Join(queueDir, taskID+".md")
+	taskPath := paths.QueueTaskPath(taskID)
 	if err := os.WriteFile(taskPath, []byte(taskBody), 0o644); err != nil {
 		return "", "", fmt.Errorf("write task file: %w", err)
 	}

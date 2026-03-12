@@ -28,11 +28,22 @@ func TestLoadAdapterAndBuildCommand(t *testing.T) {
 	}
 
 	command := BuildCommand(template, "read files")
-	if !strings.Contains(command, "read files") {
+	if !strings.Contains(command, "'read files'") {
 		t.Fatalf("prompt was not injected: %q", command)
 	}
 	if strings.Contains(command, "{prompt}") {
 		t.Fatalf("placeholder still present: %q", command)
+	}
+}
+
+func TestBuildCommandShellQuotesPrompt(t *testing.T) {
+	t.Parallel()
+
+	template := `gemini -p "{prompt}"`
+	command := BuildCommand(template, `line 1 "quoted" and it's fine`)
+
+	if want := `gemini -p 'line 1 "quoted" and it'"'"'s fine'`; command != want {
+		t.Fatalf("unexpected command: got %q want %q", command, want)
 	}
 }
 

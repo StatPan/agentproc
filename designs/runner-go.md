@@ -29,7 +29,6 @@ analysis/
 ```yaml
 agentos_root: ../AgentOS   # AgentOS 폴더 경로 (상대 또는 절대)
 layers:
-  process: claude
   subprocess: codex
   thread: gemini
 runner:

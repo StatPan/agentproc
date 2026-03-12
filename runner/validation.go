@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 )
@@ -40,16 +41,19 @@ func ValidateDoneCondition(task Task, runDir string) error {
 	return nil
 }
 
-// ValidateQualityGate checks if Quality Gate conditions are met.
-func ValidateQualityGate(task Task, runDir string) error {
+// ValidateQualityGate checks if Quality Gate conditions are met by executing each command sequentially.
+func ValidateQualityGate(task Task, agentOSRoot string) error {
 	if len(task.QualityGate) == 0 {
 		return nil
 	}
 
-	// Example logic: just ensuring the directory structure exists for quality gate outputs
-	outDir := filepath.Join(runDir, "out")
-	if _, err := os.Stat(outDir); os.IsNotExist(err) {
-		return fmt.Errorf("out directory does not exist, quality gate failed")
+	for _, cmdStr := range task.QualityGate {
+		cmd := exec.Command("sh", "-c", cmdStr)
+		cmd.Dir = agentOSRoot
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("quality gate command %q failed: %v\nOutput: %s", cmdStr, err, string(out))
+		}
 	}
 
 	return nil
@@ -85,4 +89,37 @@ func ValidateThreadWrapperUsage(runDir string) error {
 	}
 
 	return nil
+}
+
+// ValidateOutputPaths ensures that every expected path exists either under the AgentOS root or under the isolated run directory.
+func ValidateOutputPaths(task Task, agentOSRoot, runDir string) error {
+	paths := task.ExpectedOutputPaths()
+	if len(paths) == 0 {
+		return nil
+	}
+
+	for _, p := range paths {
+		if outputPathExists(agentOSRoot, runDir, p) {
+			continue
+		}
+		return fmt.Errorf("Output missing: %s", p)
+	}
+
+	return nil
+}
+
+func outputPathExists(agentOSRoot, runDir, outputPath string) bool {
+	if _, err := os.Stat(filepath.Join(agentOSRoot, outputPath)); err == nil {
+		return true
+	}
+	if _, err := os.Stat(filepath.Join(runDir, outputPath)); err == nil {
+		return true
+	}
+	if _, err := os.Stat(filepath.Join(runDir, "out", outputPath)); err == nil {
+		return true
+	}
+	if _, err := findOutputFile(filepath.Join(runDir, "out"), filepath.Base(outputPath)); err == nil {
+		return true
+	}
+	return false
 }

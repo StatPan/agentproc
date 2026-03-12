@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -14,9 +15,17 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 )
 
 var executeTaskFunc = executeTask
+
+type taskClaim struct {
+	task      *Task
+	runID     string
+	runDir    string
+	queuePath string
+}
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -69,16 +78,16 @@ func runLegacyCommand(args []string) error {
 		return err
 	}
 
-	cfg, queueDir, _, _, err := loadRuntimeConfig(*rootFlag, *configFlag)
+	cfg, paths, err := loadRuntimeConfig(*rootFlag, *configFlag)
 	if err != nil {
 		return err
 	}
 
 	switch strings.ToLower(strings.TrimSpace(*transportFlag)) {
 	case "http":
-		return serveHTTP(cfg, queueDir, ":"+*portFlag, newDispatchReinvokeFunc(cfg, *rootFlag, *configFlag))
+		return serveHTTP(cfg, paths.QueueDir(), ":"+*portFlag, newDispatchReinvokeFunc(cfg, *rootFlag, *configFlag))
 	case "mcp":
-		return StartMCPServer(cfg, queueDir, newDispatchReinvokeFunc(cfg, *rootFlag, *configFlag))
+		return StartMCPServer(cfg, paths.QueueDir(), newDispatchReinvokeFunc(cfg, *rootFlag, *configFlag))
 	default:
 		return fmt.Errorf("unsupported transport %q", *transportFlag)
 	}
@@ -94,16 +103,16 @@ func runServeCommand(args []string) error {
 		return err
 	}
 
-	cfg, queueDir, _, _, err := loadRuntimeConfig(*rootFlag, *configFlag)
+	cfg, paths, err := loadRuntimeConfig(*rootFlag, *configFlag)
 	if err != nil {
 		return err
 	}
 
 	switch strings.ToLower(strings.TrimSpace(*transportFlag)) {
 	case "http":
-		return serveHTTP(cfg, queueDir, ":"+*portFlag, newDispatchReinvokeFunc(cfg, *rootFlag, *configFlag))
+		return serveHTTP(cfg, paths.QueueDir(), ":"+*portFlag, newDispatchReinvokeFunc(cfg, *rootFlag, *configFlag))
 	case "mcp":
-		return StartMCPServer(cfg, queueDir, newDispatchReinvokeFunc(cfg, *rootFlag, *configFlag))
+		return StartMCPServer(cfg, paths.QueueDir(), newDispatchReinvokeFunc(cfg, *rootFlag, *configFlag))
 	default:
 		return fmt.Errorf("unsupported transport %q", *transportFlag)
 	}
@@ -121,7 +130,7 @@ func runDispatchCommand(args []string) error {
 		return err
 	}
 
-	cfg, queueDir, runIndexDir, outputsDir, err := loadRuntimeConfig(*rootFlag, *configFlag)
+	cfg, paths, err := loadRuntimeConfig(*rootFlag, *configFlag)
 	if err != nil {
 		return err
 	}
@@ -129,39 +138,47 @@ func runDispatchCommand(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGINT)
 	defer stop()
 
-	return RunDispatchOnce(ctx, cfg, queueDir, runIndexDir, outputsDir)
+	return RunDispatchOnce(ctx, cfg, paths)
 }
 
-func loadRuntimeConfig(rootArg string, configArg string) (*Config, string, string, string, error) {
+func loadRuntimeConfig(rootArg string, configArg string) (*Config, *RuntimePaths, error) {
 	root, err := filepath.Abs(rootArg)
 	if err != nil {
-		return nil, "", "", "", fmt.Errorf("resolve root path: %w", err)
+		return nil, nil, fmt.Errorf("resolve root path: %w", err)
 	}
 
-	configPath, err := filepath.Abs(configArg)
+	projectRoot, err := detectProjectRoot(root)
 	if err != nil {
-		return nil, "", "", "", fmt.Errorf("resolve config path: %w", err)
+		return nil, nil, fmt.Errorf("detect project root: %w", err)
 	}
 
-	cfg, err := LoadConfig(configPath)
+	cfg, configPath, err := loadProjectConfig(projectRoot, configArg)
 	if err != nil {
-		return nil, "", "", "", fmt.Errorf("load config: %w", err)
+		return nil, nil, fmt.Errorf("load config: %w", err)
 	}
 
 	if cfg.AgentOSRoot == "" {
-		cfg.AgentOSRoot = root
+		cfg.AgentOSRoot = projectRoot
 	} else if !filepath.IsAbs(cfg.AgentOSRoot) {
-		cfg.AgentOSRoot = filepath.Clean(filepath.Join(root, cfg.AgentOSRoot))
+		baseDir := projectRoot
+		if configPath != "" {
+			baseDir = filepath.Dir(configPath)
+		}
+		cfg.AgentOSRoot = filepath.Clean(filepath.Join(baseDir, cfg.AgentOSRoot))
 	}
+	cfg.AgentOSRoot = canonicalProjectPath(cfg.AgentOSRoot)
 
 	if cfg.Runner.MaxConcurrent <= 0 {
 		cfg.Runner.MaxConcurrent = runtime.NumCPU()
 	}
+	if cfg.Runner.PollInterval <= 0 {
+		cfg.Runner.PollInterval = 5 * time.Second
+	}
+	if strings.TrimSpace(cfg.Runner.Mode) == "" {
+		cfg.Runner.Mode = "daemon"
+	}
 
-	queueDir := filepath.Join(cfg.AgentOSRoot, "tasks", "queue")
-	runIndexDir := filepath.Join(cfg.AgentOSRoot, "tasks", ".run")
-	outputsDir := filepath.Join(cfg.AgentOSRoot, "outputs")
-	return cfg, queueDir, runIndexDir, outputsDir, nil
+	return cfg, cfg.RuntimePaths(), nil
 }
 
 func serveHTTP(cfg *Config, queueDir, addr string, dispatch func(context.Context) error) error {
@@ -209,59 +226,28 @@ func newDispatchReinvokeFunc(cfg *Config, rootArg, configArg string) func(contex
 	}
 }
 
-type runningSet struct {
-	mu    sync.Mutex
-	tasks map[string]struct{}
-}
-
-func newRunningSet() *runningSet {
-	return &runningSet{tasks: make(map[string]struct{})}
-}
-
-func (r *runningSet) TryStart(taskID string) bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if _, exists := r.tasks[taskID]; exists {
-		return false
-	}
-	r.tasks[taskID] = struct{}{}
-	return true
-}
-
-func (r *runningSet) Done(taskID string) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	delete(r.tasks, taskID)
-}
-
-func RunDispatchOnce(ctx context.Context, cfg *Config, queueDir, runIndexDir, outputsDir string) error {
-	return dispatchTasks(ctx, cfg, queueDir, runIndexDir, outputsDir, nil)
+func RunDispatchOnce(ctx context.Context, cfg *Config, paths *RuntimePaths) error {
+	return dispatchTasks(ctx, cfg, paths, nil)
 }
 
 func dispatchCycle(
 	ctx context.Context,
 	cfg *Config,
-	queueDir string,
-	runIndexDir string,
-	outputsDir string,
+	paths *RuntimePaths,
 	onTaskComplete func(),
 ) error {
-	return dispatchTasks(ctx, cfg, queueDir, runIndexDir, outputsDir, onTaskComplete)
+	return dispatchTasks(ctx, cfg, paths, onTaskComplete)
 }
 
 func dispatchTasks(
 	ctx context.Context,
 	cfg *Config,
-	queueDir string,
-	runIndexDir string,
-	outputsDir string,
+	paths *RuntimePaths,
 	onTaskComplete func(),
 ) error {
 	sem := make(chan struct{}, cfg.Runner.MaxConcurrent)
-	running := newRunningSet()
 
-	tasks, err := collectDispatchableTasks(queueDir, runIndexDir, outputsDir)
+	tasks, err := collectDispatchableTasks(paths)
 	if err != nil {
 		return err
 	}
@@ -271,31 +257,38 @@ func dispatchTasks(
 		if ctx.Err() != nil {
 			break
 		}
-		if !running.TryStart(task.TaskID) {
+		claim, err := claimTask(paths, task)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return err
+		}
+		if claim == nil {
 			continue
 		}
 
 		switch strings.ToLower(strings.TrimSpace(task.Execution)) {
 		case "parallel":
 			if !acquireSemaphore(ctx, sem) {
-				running.Done(task.TaskID)
+				if err := releaseTaskClaim(paths, claim); err != nil {
+					log.Printf("release claim %s: %v", claim.task.TaskID, err)
+				}
 				break
 			}
 			wg.Add(1)
-			go func(task *Task) {
+			go func(claim *taskClaim) {
 				defer wg.Done()
 				defer func() {
 					<-sem
-					running.Done(task.TaskID)
 					if onTaskComplete != nil {
 						onTaskComplete()
 					}
 				}()
-				executeTaskFunc(cfg, queueDir, task)
-			}(task)
+				executeTaskFunc(cfg, claim)
+			}(claim)
 		default:
-			executeTaskFunc(cfg, queueDir, task)
-			running.Done(task.TaskID)
+			executeTaskFunc(cfg, claim)
 			if onTaskComplete != nil {
 				onTaskComplete()
 			}
@@ -306,18 +299,22 @@ func dispatchTasks(
 	return nil
 }
 
-func collectDispatchableTasks(queueDir, runIndexDir, outputsDir string) ([]*Task, error) {
-	tasks, err := LoadQueue(queueDir)
+func collectDispatchableTasks(paths *RuntimePaths) ([]*Task, error) {
+	tasks, err := LoadQueue(paths.QueueDir())
 	if err != nil {
 		return nil, err
 	}
 
-	dependencyIndex, err := buildDependencyIndex(queueDir, runIndexDir)
+	if err := recoverStaleActiveRuns(paths); err != nil {
+		return nil, err
+	}
+
+	dependencyIndex, err := buildDependencyIndex(paths.QueueDir(), paths.ActiveRunsDir())
 	if err != nil {
 		return nil, err
 	}
 
-	runningIDs, err := loadRunningTaskIDs(runIndexDir)
+	runningIDs, err := loadRunningTaskIDs(paths.ActiveRunsDir())
 	if err != nil {
 		return nil, err
 	}
@@ -327,7 +324,7 @@ func collectDispatchableTasks(queueDir, runIndexDir, outputsDir string) ([]*Task
 		if slices.Contains(runningIDs, task.TaskID) {
 			continue
 		}
-		ready, err := dependenciesSatisfied(task, dependencyIndex, outputsDir)
+		ready, err := dependenciesSatisfied(task, dependencyIndex, paths)
 		if err != nil {
 			log.Printf("skip %s: %v", task.TaskID, err)
 			continue
@@ -340,14 +337,152 @@ func collectDispatchableTasks(queueDir, runIndexDir, outputsDir string) ([]*Task
 	return dispatchable, nil
 }
 
-func executeTask(cfg *Config, queueDir string, task *Task) {
-	if err := RunTask(task, cfg); err != nil {
-		log.Printf("task %s failed: %v", task.TaskID, err)
+func recoverStaleActiveRuns(paths *RuntimePaths) error {
+	entries, err := os.ReadDir(paths.ActiveRunsDir())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read active runs dir: %w", err)
 	}
 
-	taskPath := filepath.Join(queueDir, task.TaskID+".md")
-	if err := os.Remove(taskPath); err != nil && !os.IsNotExist(err) {
-		log.Printf("remove task %s from queue: %v", task.TaskID, err)
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		if err := recoverStaleActiveRun(paths, entry.Name()); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func recoverStaleActiveRun(paths *RuntimePaths, runID string) error {
+	statePath := paths.ActiveRunStatePath(runID)
+	state, err := loadRunState(statePath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("load active run state %s: %w", statePath, err)
+	}
+	if !strings.EqualFold(strings.TrimSpace(state.Status), "running") {
+		return nil
+	}
+	if processAlive(state.PID) {
+		return nil
+	}
+
+	recoveredStatus := "interrupted"
+	reason := "missing process liveness for active run"
+
+	summary := newRunSummary(
+		state.RunID,
+		state.TaskID,
+		filepath.Join(paths.ActiveRunDir(runID), "task.md"),
+		"",
+		"",
+		parseRunStateStartedAt(state.StartedAt),
+	)
+	summary.Status = recoveredStatus
+	summary.FinishedAt = time.Now().UTC().Format(time.RFC3339)
+	summary.Events = append(summary.Events, "recovered stale active run before dispatch")
+	summary.Error = reason
+
+	state.Status = recoveredStatus
+	state.PID = 0
+
+	if err := saveRunSummary(paths.RunSummaryPath(runID), summary); err != nil {
+		return fmt.Errorf("write recovered run summary %s: %w", runID, err)
+	}
+	if err := writeRunState(statePath, state); err != nil {
+		return fmt.Errorf("write recovered active run state %s: %w", runID, err)
+	}
+	if err := writeRunState(paths.CompletedRunStatePath(runID), state); err != nil {
+		return fmt.Errorf("write recovered completed run state %s: %w", runID, err)
+	}
+
+	return nil
+}
+
+func parseRunStateStartedAt(value string) time.Time {
+	startedAt, err := time.Parse(time.RFC3339, strings.TrimSpace(value))
+	if err != nil {
+		return time.Now().UTC()
+	}
+	return startedAt
+}
+
+func processAlive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	err = proc.Signal(syscall.Signal(0))
+	return err == nil
+}
+
+func claimTask(paths *RuntimePaths, task *Task) (*taskClaim, error) {
+	if task == nil {
+		return nil, fmt.Errorf("task is nil")
+	}
+
+	runID := fmt.Sprintf("%s-%s", time.Now().Format("20060102-150405"), task.TaskID)
+	runDir := paths.ActiveRunDir(runID)
+	if err := os.MkdirAll(filepath.Join(runDir, "out"), 0o755); err != nil {
+		return nil, fmt.Errorf("create run dir: %w", err)
+	}
+
+	queuePath := paths.QueueTaskPath(task.TaskID)
+	claimedPath := filepath.Join(runDir, "task.md")
+	if err := copyFile(queuePath, claimedPath); err != nil {
+		if os.IsNotExist(err) {
+			_ = os.RemoveAll(runDir)
+			return nil, os.ErrNotExist
+		}
+		_ = os.RemoveAll(runDir)
+		return nil, fmt.Errorf("claim task %s: %w", task.TaskID, err)
+	}
+
+	state := &RunState{
+		RunID:     runID,
+		TaskID:    task.TaskID,
+		Status:    "running",
+		StartedAt: time.Now().UTC().Format(time.RFC3339),
+		PID:       os.Getpid(),
+	}
+	if err := writeRunState(paths.ActiveRunStatePath(runID), state); err != nil {
+		_ = os.RemoveAll(runDir)
+		return nil, fmt.Errorf("write claim state %s: %w", task.TaskID, err)
+	}
+
+	return &taskClaim{task: task, runID: runID, runDir: runDir, queuePath: queuePath}, nil
+}
+
+func releaseTaskClaim(paths *RuntimePaths, claim *taskClaim) error {
+	if claim == nil || claim.task == nil {
+		return nil
+	}
+
+	if err := os.RemoveAll(claim.runDir); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove run dir %s: %w", claim.runID, err)
+	}
+	return nil
+}
+
+func executeTask(cfg *Config, claim *taskClaim) {
+	if claim == nil || claim.task == nil {
+		log.Printf("skip empty task claim")
+		return
+	}
+
+	if err := runTask(claim.task, cfg, claim.runID, claim.runDir, claim.queuePath); err != nil {
+		log.Printf("task %s failed: %v", claim.task.TaskID, err)
+		return
 	}
 }
 
@@ -418,28 +553,33 @@ func loadRunningTaskIDs(runIndexDir string) ([]string, error) {
 		if !entry.IsDir() {
 			continue
 		}
-		taskPath := filepath.Join(runIndexDir, entry.Name(), "task.md")
-		task, err := ParseTask(taskPath)
+		statePath := filepath.Join(runIndexDir, entry.Name(), "run.json")
+		state, err := loadRunState(statePath)
 		if err != nil {
-			if os.IsNotExist(err) {
+			if errors.Is(err, os.ErrNotExist) {
 				continue
 			}
-			return nil, fmt.Errorf("parse running task %s: %w", taskPath, err)
+			return nil, fmt.Errorf("load running state %s: %w", statePath, err)
 		}
-		taskIDs = append(taskIDs, task.TaskID)
+		if !strings.EqualFold(strings.TrimSpace(state.Status), "running") {
+			continue
+		}
+		if strings.TrimSpace(state.TaskID) != "" {
+			taskIDs = append(taskIDs, state.TaskID)
+		}
 	}
 
 	return taskIDs, nil
 }
 
-func dependenciesSatisfied(task *Task, dependencyIndex map[string]string, outputsDir string) (bool, error) {
+func dependenciesSatisfied(task *Task, dependencyIndex map[string]string, paths *RuntimePaths) (bool, error) {
 	for _, depID := range task.DependsOn {
 		outputPath, ok := dependencyIndex[depID]
 		if !ok {
 			outputPath = defaultDependencyOutputPath(depID)
 		}
 
-		resolvedPath := resolveOutputPath(outputsDir, outputPath)
+		resolvedPath := paths.ResolveOutputPath(outputPath)
 		if _, err := os.Stat(resolvedPath); err != nil {
 			if os.IsNotExist(err) {
 				return false, nil
@@ -453,16 +593,4 @@ func dependenciesSatisfied(task *Task, dependencyIndex map[string]string, output
 
 func defaultDependencyOutputPath(taskID string) string {
 	return filepath.Join("outputs", "result-"+taskID+".md")
-}
-
-func resolveOutputPath(outputsDir string, outputPath string) string {
-	cleaned := filepath.Clean(outputPath)
-	prefix := "outputs" + string(filepath.Separator)
-	if cleaned == "outputs" {
-		return outputsDir
-	}
-	if strings.HasPrefix(cleaned, prefix) {
-		return filepath.Join(filepath.Dir(outputsDir), cleaned)
-	}
-	return filepath.Join(outputsDir, cleaned)
 }

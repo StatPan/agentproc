@@ -52,5 +52,16 @@ func LoadAdapter(adapterPath string) (string, error) {
 }
 
 func BuildCommand(template, prompt string) string {
-	return strings.ReplaceAll(template, "{prompt}", prompt)
+	quoted := shellQuote(prompt)
+	command := strings.ReplaceAll(template, "\"{prompt}\"", quoted)
+	command = strings.ReplaceAll(command, "'{prompt}'", quoted)
+	command = strings.ReplaceAll(command, "{prompt}", quoted)
+	return command
+}
+
+func shellQuote(value string) string {
+	if value == "" {
+		return "''"
+	}
+	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }

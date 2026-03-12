@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -21,9 +22,19 @@ func TestParseTaskAndLoadQueue(t *testing.T) {
 
 ## Assigned To: codex
 
+## RetryCount: 2
+
 ## Output
 - ` + "`outputs/research/result.md`" + `
 - ` + "`outputs/research/extra.md`" + `
+
+## Done Condition
+- output exists
+- tests pass
+
+## QualityGate
+- cd runner && go test ./...
+- cd runner && go build -o agentos-runner
 `
 
 	secondTask := `## Task ID: T-002
@@ -79,8 +90,17 @@ func TestParseTaskAndLoadQueue(t *testing.T) {
 	if parsed.AssignedTo != "codex" {
 		t.Fatalf("AssignedTo = %q, want %q", parsed.AssignedTo, "codex")
 	}
-	if parsed.Output != "outputs/research/result.md" {
-		t.Fatalf("Output = %q, want %q", parsed.Output, "outputs/research/result.md")
+	if parsed.RetryCount != 2 {
+		t.Fatalf("RetryCount = %d, want %d", parsed.RetryCount, 2)
+	}
+	if parsed.Output != "outputs/research/result.md, outputs/research/extra.md" {
+		t.Fatalf("Output = %q, want %q", parsed.Output, "outputs/research/result.md, outputs/research/extra.md")
+	}
+	if len(parsed.DoneCondition) != 2 || parsed.DoneCondition[0] != "output exists" || parsed.DoneCondition[1] != "tests pass" {
+		t.Fatalf("DoneCondition = %#v", parsed.DoneCondition)
+	}
+	if len(parsed.QualityGate) != 2 || parsed.QualityGate[0] != "cd runner && go test ./..." || parsed.QualityGate[1] != "cd runner && go build -o agentos-runner" {
+		t.Fatalf("QualityGate = %#v", parsed.QualityGate)
 	}
 
 	tasks, err := LoadQueue(queueDir)
@@ -100,5 +120,15 @@ func TestParseTaskAndLoadQueue(t *testing.T) {
 	}
 	if tasks[1].Output != "outputs/docs/result.md" {
 		t.Fatalf("tasks[1].Output = %q, want %q", tasks[1].Output, "outputs/docs/result.md")
+	}
+}
+
+func TestTaskExpectedOutputPaths(t *testing.T) {
+	task := Task{Output: " outputs/a.md, reports/b.txt , , out/c.json "}
+
+	got := task.ExpectedOutputPaths()
+	want := []string{"outputs/a.md", "reports/b.txt", "out/c.json"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ExpectedOutputPaths() = %#v, want %#v", got, want)
 	}
 }

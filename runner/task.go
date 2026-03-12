@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -23,6 +24,23 @@ type Task struct {
 	QualityGate   []string
 	Timeout       string
 	RetryCount    int
+}
+
+func (t Task) ExpectedOutputPaths() []string {
+	if strings.TrimSpace(t.Output) == "" {
+		return nil
+	}
+
+	parts := strings.Split(t.Output, ",")
+	paths := make([]string, 0, len(parts))
+	for _, part := range parts {
+		path := strings.TrimSpace(part)
+		if path != "" {
+			paths = append(paths, path)
+		}
+	}
+
+	return paths
 }
 
 func ParseTask(path string) (*Task, error) {
@@ -63,6 +81,18 @@ func ParseTask(path string) (*Task, error) {
 				task.DesignRef = value
 			case "Assigned To":
 				task.AssignedTo = value
+			case "Retry Count", "RetryCount":
+				if value != "" {
+					retryCount, err := strconv.Atoi(strings.Split(value, " ")[0])
+					if err != nil {
+						return nil, fmt.Errorf("parse retry count: %w", err)
+					}
+					task.RetryCount = retryCount
+				}
+			case "Timeout":
+				if value != "" {
+					task.Timeout = strings.Split(value, " ")[0]
+				}
 			case "Output":
 				if hasValue && value != "" {
 					outputLines = append(outputLines, value)
@@ -79,6 +109,14 @@ func ParseTask(path string) (*Task, error) {
 			}
 		case "Input":
 			inputLines = append(inputLines, line)
+		case "QualityGate":
+			if item := parseListItem(line); item != "" {
+				task.QualityGate = append(task.QualityGate, item)
+			}
+		case "Done Condition":
+			if item := parseListItem(line); item != "" {
+				task.DoneCondition = append(task.DoneCondition, item)
+			}
 		}
 	}
 
@@ -86,7 +124,7 @@ func ParseTask(path string) (*Task, error) {
 		return nil, fmt.Errorf("scan task file: %w", err)
 	}
 
-	task.Output = parseFirstOutputPath(outputLines)
+	task.Output = parseOutput(outputLines)
 	task.Input = strings.TrimSpace(strings.Join(inputLines, "\n"))
 
 	return task, nil
@@ -154,15 +192,55 @@ func parseDependsOn(value string) []string {
 	return dependsOn
 }
 
-func parseFirstOutputPath(lines []string) string {
+func parseOutput(lines []string) string {
+	var paths []string
 	for _, line := range lines {
-		if start := strings.Index(line, "`"); start >= 0 {
-			rest := line[start+1:]
-			if end := strings.Index(rest, "`"); end >= 0 {
-				return rest[:end]
+		start := 0
+		for {
+			s := strings.Index(line[start:], "`")
+			if s == -1 {
+				break
+			}
+			s += start
+			e := strings.Index(line[s+1:], "`")
+			if e == -1 {
+				break
+			}
+			e += s + 1
+			path := strings.TrimSpace(line[s+1 : e])
+			if path != "" {
+				paths = append(paths, path)
+			}
+			start = e + 1
+		}
+	}
+
+	if len(paths) == 0 {
+		for _, line := range lines {
+			trimmed := strings.TrimSpace(line)
+			if trimmed == "" {
+				continue
+			}
+			if strings.HasPrefix(trimmed, "- ") {
+				trimmed = strings.TrimPrefix(trimmed, "- ")
+			}
+			parts := strings.Split(trimmed, ",")
+			for _, p := range parts {
+				p = strings.TrimSpace(p)
+				if p != "" {
+					paths = append(paths, p)
+				}
 			}
 		}
 	}
 
-	return ""
+	return strings.Join(paths, ", ")
+}
+
+func parseListItem(line string) string {
+	trimmed := strings.TrimSpace(line)
+	if !strings.HasPrefix(trimmed, "- ") {
+		return ""
+	}
+	return strings.TrimSpace(strings.TrimPrefix(trimmed, "- "))
 }

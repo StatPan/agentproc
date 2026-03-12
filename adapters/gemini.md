@@ -2,7 +2,7 @@
 
 ## agentic
 ```
-gemini -m gemini-3.1-pro-preview -y -p "{prompt}" < /dev/null
+gemini -m gemini-3-flash-preview -y -p "{prompt}" < /dev/null
 ```
 
 ## context
