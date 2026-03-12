@@ -1,0 +1,12 @@
+# 격리 런 폴더 — 생성되었다가 삭제되는 영역, 커밋하지 않음
+tasks/.run/
+tasks/.intake/
+
+# 실행 산출물과 운영 로그 — 공개 저장소에 포함하지 않음
+outputs/
+dispatch.log
+CURRENT_STATUS.md
+
+# 로컬 빌드 산출물
+runner/aproc
+runner/agentos-runner

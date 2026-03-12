@@ -1,0 +1,9 @@
+agentos_root: /home/statpan/workspace/agentproc
+layers:
+  process: claude
+  subprocess: claude
+  thread: gemini
+runner:
+  max_concurrent: 0
+  poll_interval: 5s
+  mode: daemon
