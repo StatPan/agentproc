@@ -2,7 +2,7 @@
 
 ## agentic
 ```
-claude --dangerously-skip-permissions -p "{prompt}"
+claude --dangerously-skip-permissions -p "{prompt}" < /dev/null
 ```
 
 ## context

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -106,6 +107,25 @@ func runTask(task *Task, cfg *Config, runID, runDir, queuePath string) error {
 		if err := writeRunState(completedStatePath, runState); err != nil {
 			return fmt.Errorf("write completed run state: %w", err)
 		}
+		if sessionID, findErr := sessionIDForTask(paths, task.TaskID); findErr == nil && strings.TrimSpace(sessionID) != "" {
+			appendErr := appendCanonicalEvent(paths, sessionID, eventRunFinished, "run", runID, runFinishedPayload{
+				RunID:        runID,
+				TaskID:       task.TaskID,
+				Status:       string(status),
+				StartedAt:    summary.StartedAt,
+				FinishedAt:   summary.FinishedAt,
+				DurationMS:   summary.DurationMS,
+				ResultPath:   summary.ResultPath,
+				StdoutPath:   summary.StdoutPath,
+				StderrPath:   summary.StderrPath,
+				EvidencePath: summary.EvidencePath,
+				Error:        summary.Error,
+				Events:       append([]string(nil), summary.Events...),
+			})
+			if appendErr != nil {
+				return fmt.Errorf("append canonical run finish: %w", appendErr)
+			}
+		}
 
 		if queuePath != "" {
 			if err := os.Remove(queuePath); err != nil && !os.IsNotExist(err) {
@@ -183,8 +203,12 @@ func runTask(task *Task, cfg *Config, runID, runDir, queuePath string) error {
 		summary.Events = append(summary.Events, fmt.Sprintf("subprocess attempt %d started", attempt))
 
 		command := BuildCommand(template, buildPrompt(runDir, retryCount > 0))
-		cmd := buildExecCommand(command)
+		taskTimeout := parseTaskTimeout(task.Timeout, 30*time.Minute)
+		subCtx, subCancel := context.WithTimeout(context.Background(), taskTimeout)
+		defer subCancel()
+		cmd := buildExecCommandCtx(subCtx, command)
 		cmd.Dir = cfg.AgentOSRoot
+		cmd.Stdin = nil
 		cmd.Stdout = stdoutFile
 		cmd.Stderr = stderrFile
 
@@ -329,6 +353,24 @@ func buildExecCommand(command string) *exec.Cmd {
 	return exec.Command("sh", "-c", command)
 }
 
+func parseTaskTimeout(s string, defaultDur time.Duration) time.Duration {
+	if s == "" {
+		return defaultDur
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil || d <= 0 {
+		return defaultDur
+	}
+	return d
+}
+
+func buildExecCommandCtx(ctx context.Context, command string) *exec.Cmd {
+	if runtime.GOOS == "windows" {
+		return exec.CommandContext(ctx, "cmd", "/C", command)
+	}
+	return exec.CommandContext(ctx, "sh", "-c", command)
+}
+
 func runQualityGateCommands(commands []string, workingDir string) error {
 	for _, command := range commands {
 		trimmed := strings.TrimSpace(command)
@@ -359,7 +401,7 @@ func generateDirection(task *Task, cfg *Config, runDir string) error {
 		sb.WriteString(task.Input + "\n\n")
 	}
 
-	if task.DesignRef != "" {
+	if task.DesignRef != "" && task.DesignRef != "none" {
 		designPath := filepath.Join(cfg.AgentOSRoot, task.DesignRef)
 		data, err := os.ReadFile(designPath)
 		if err != nil {
@@ -615,6 +657,7 @@ with stdout_path.open("wb") as stdout_file, stderr_path.open("wb") as stderr_fil
             command,
             shell=True,
             cwd=cfg["AgentOSRoot"],
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
         )
