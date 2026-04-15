@@ -56,6 +56,22 @@ func (p *RuntimePaths) IntakeSessionsDir() string {
 	return filepath.Join(p.agentOSRoot, "tasks", ".intake")
 }
 
+func (p *RuntimePaths) RequestsDir() string {
+	return filepath.Join(p.projectRoot(), "requests")
+}
+
+func (p *RuntimePaths) InterventionsDir() string {
+	return filepath.Join(p.projectRoot(), "interventions")
+}
+
+func (p *RuntimePaths) CanonicalDir() string {
+	return filepath.Join(p.projectRoot(), "canonical")
+}
+
+func (p *RuntimePaths) CanonicalDBPath() string {
+	return filepath.Join(p.CanonicalDir(), "session_ledger.db")
+}
+
 func (p *RuntimePaths) ActiveRunsDir() string {
 	if p.hiddenRuntime {
 		return filepath.Join(p.projectRoot(), "runs", "active")
