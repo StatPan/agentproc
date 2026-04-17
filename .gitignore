@@ -10,3 +10,10 @@ CURRENT_STATUS.md
 # 로컬 빌드 산출물
 runner/aproc
 runner/agentos-runner
+
+# Python venv and temp repair scripts
+tools/.venv/
+tools/__pycache__/
+runner/fix_*.py
+runner/*.bak
+runner/*.broken

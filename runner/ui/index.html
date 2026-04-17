@@ -1,0 +1,1291 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>aproc workbench</title>
+  <style>
+    :root {
+      --bg: #f5ecd9;
+      --panel: rgba(255, 252, 245, 0.88);
+      --panel-strong: rgba(255, 255, 255, 0.94);
+      --line: rgba(108, 83, 44, 0.14);
+      --line-strong: rgba(108, 83, 44, 0.24);
+      --text: #1f1a14;
+      --muted: #726552;
+      --blue: #0f62fe;
+      --blue-soft: rgba(15, 98, 254, 0.12);
+      --green: #146c3e;
+      --green-soft: #e2f3e8;
+      --amber: #9f5d00;
+      --amber-soft: #fff0d4;
+      --red: #b53b2e;
+      --red-soft: #fde6e1;
+      --ink: #24374f;
+      --shadow: 0 24px 60px rgba(89, 64, 25, 0.12);
+      --grid: rgba(136, 112, 76, 0.08);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      color: var(--text);
+      font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at top left, rgba(255,255,255,0.9), transparent 28%),
+        linear-gradient(180deg, #efe2c9 0%, #f8f3e8 45%, #f0e8db 100%);
+    }
+    button, textarea { font: inherit; }
+    .shell {
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: 360px minmax(0, 1fr) 360px;
+      gap: 14px;
+      padding: 14px;
+    }
+    .panel {
+      background: var(--panel);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--line);
+      border-radius: 26px;
+      box-shadow: var(--shadow);
+      min-height: 0;
+      overflow: hidden;
+    }
+    .left-rail, .detail-rail {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+    .left-scroll, .detail-scroll {
+      flex: 1;
+      min-height: 0;
+      overflow: auto;
+      padding: 14px;
+      display: grid;
+      gap: 14px;
+      align-content: start;
+    }
+    .section {
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: rgba(255,255,255,0.68);
+      padding: 16px;
+    }
+    .brand {
+      padding: 18px 20px 14px;
+      border-bottom: 1px solid var(--line);
+    }
+    .brand h1 {
+      margin: 0;
+      font-family: "IBM Plex Serif", Georgia, serif;
+      font-size: 30px;
+      letter-spacing: -0.05em;
+      line-height: 1;
+    }
+    .brand p,
+    .meta,
+    .muted {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .section h2,
+    .section h3 {
+      margin: 0 0 8px;
+      font-size: 15px;
+      letter-spacing: -0.02em;
+    }
+    .session-list {
+      display: grid;
+      gap: 10px;
+    }
+    .session-card {
+      border: 1px solid transparent;
+      border-radius: 18px;
+      padding: 14px;
+      background: rgba(255,255,255,0.78);
+      cursor: pointer;
+    }
+    .session-card.active {
+      border-color: rgba(15, 98, 254, 0.22);
+      background: var(--panel-strong);
+    }
+    .session-card h3 {
+      margin: 0 0 6px;
+      font-size: 14px;
+      line-height: 1.35;
+    }
+    .root-stream {
+      display: grid;
+      gap: 10px;
+      max-height: 420px;
+      overflow: auto;
+      padding-right: 4px;
+    }
+    .chat-item {
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 12px 13px;
+      background: rgba(255,255,255,0.78);
+    }
+    .chat-item.user { border-color: rgba(15, 98, 254, 0.18); background: rgba(238, 244, 255, 0.82); }
+    .chat-item.system { border-color: rgba(159, 93, 0, 0.18); background: rgba(255, 245, 226, 0.82); }
+    .chat-item.operator { border-color: rgba(20, 108, 62, 0.16); background: rgba(229, 244, 234, 0.78); }
+    .chat-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 6px;
+    }
+    .chat-body {
+      font-size: 13px;
+      line-height: 1.55;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .bullet-list {
+      margin: 8px 0 0;
+      padding-left: 18px;
+      font-size: 13px;
+      line-height: 1.55;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 11px;
+      background: var(--blue-soft);
+      color: var(--blue);
+      flex-shrink: 0;
+    }
+    .badge.running, .badge.done, .badge.completed { background: var(--green-soft); color: var(--green); }
+    .badge.spawning, .badge.planned, .badge.queued, .badge.needs-input, .badge.needs-clarification { background: var(--amber-soft); color: var(--amber); }
+    .badge.failed, .badge.interrupted, .badge.cancelled { background: var(--red-soft); color: var(--red); }
+    .workspace {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+    }
+    .topbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 18px;
+      padding: 18px 22px 14px;
+      border-bottom: 1px solid var(--line);
+    }
+    .topbar h2 {
+      margin: 0;
+      font-family: "IBM Plex Serif", Georgia, serif;
+      font-size: 31px;
+      letter-spacing: -0.05em;
+      line-height: 1.04;
+    }
+    .toggle,
+    .tabbar,
+    .canvas-tools,
+    .detail-actions,
+    .inline-actions {
+      display: inline-flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .toggle {
+      padding: 6px;
+      background: rgba(255,255,255,0.7);
+      border-radius: 999px;
+    }
+    .toggle button,
+    .tabbar button,
+    .canvas-tools button,
+    .detail-actions button,
+    .inline-actions button,
+    .composer button,
+    .section button {
+      border: 0;
+      border-radius: 999px;
+      padding: 10px 14px;
+      cursor: pointer;
+      background: rgba(255,255,255,0.72);
+      color: var(--muted);
+    }
+    .toggle button.active,
+    .tabbar button.active,
+    .canvas-tools button.active,
+    .detail-actions button.primary,
+    .inline-actions button.primary,
+    .composer button.primary,
+    .section button.primary {
+      background: var(--blue);
+      color: white;
+    }
+    .workspace-body {
+      flex: 1;
+      min-height: 0;
+      padding: 14px;
+    }
+    .canvas-shell {
+      height: 100%;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .canvas-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 14px;
+      align-items: center;
+    }
+    .status-strip {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .status-chip {
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.76);
+      padding: 12px 14px;
+    }
+    .status-chip strong {
+      display: block;
+      font-size: 20px;
+      line-height: 1.1;
+      margin-bottom: 4px;
+    }
+    .canvas-stage {
+      position: relative;
+      flex: 1;
+      min-height: 620px;
+      border-radius: 26px;
+      border: 1px solid var(--line);
+      overflow: hidden;
+      cursor: grab;
+      background:
+        linear-gradient(var(--grid) 1px, transparent 1px),
+        linear-gradient(90deg, var(--grid) 1px, transparent 1px),
+        linear-gradient(180deg, rgba(255,255,255,0.72), rgba(249,243,233,0.86));
+      background-size: 32px 32px, 32px 32px, auto;
+    }
+    .canvas-stage.grabbing { cursor: grabbing; }
+    .canvas-world {
+      position: absolute;
+      inset: 0;
+      transform-origin: 0 0;
+      will-change: transform;
+    }
+    .edge-layer {
+      position: absolute;
+      inset: 0;
+      overflow: visible;
+      pointer-events: none;
+    }
+    .edge-line {
+      stroke: rgba(72, 78, 101, 0.2);
+      stroke-width: 2.3;
+      fill: none;
+    }
+    .lane-label {
+      position: absolute;
+      left: 24px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 11px;
+      color: var(--ink);
+      background: rgba(255,255,255,0.75);
+      border: 1px solid rgba(109,93,63,0.12);
+    }
+    .node-card {
+      position: absolute;
+      width: 250px;
+      border-radius: 22px;
+      border: 1px solid rgba(109, 93, 63, 0.14);
+      background: rgba(255,255,255,0.9);
+      box-shadow: 0 12px 30px rgba(69, 54, 25, 0.08);
+      padding: 14px;
+      cursor: pointer;
+      animation: card-in 180ms ease;
+    }
+    .node-card.root { width: 300px; }
+    .node-card.selected {
+      border-color: rgba(15, 98, 254, 0.32);
+      box-shadow: 0 16px 36px rgba(15, 98, 254, 0.16);
+    }
+    .node-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 10px;
+    }
+    .node-card h3 {
+      margin: 0;
+      font-size: 15px;
+      line-height: 1.28;
+    }
+    .node-subtitle {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+      min-height: 34px;
+    }
+    .stage-strip {
+      height: 7px;
+      border-radius: 999px;
+      margin: 12px 0 10px;
+      background: var(--blue-soft);
+      overflow: hidden;
+    }
+    .stage-strip > div {
+      height: 100%;
+      width: 100%;
+      opacity: 0.92;
+    }
+    .stage-strip.running > div,
+    .stage-strip.done > div { background: linear-gradient(90deg, #31b56d, #146c3e); }
+    .stage-strip.spawning > div,
+    .stage-strip.planned > div,
+    .stage-strip.needs-input > div { background: linear-gradient(90deg, #efb54b, #9f5d00); }
+    .stage-strip.failed > div,
+    .stage-strip.cancelled > div { background: linear-gradient(90deg, #dd6854, #b53b2e); }
+    .node-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 10px;
+    }
+    .mini-chip {
+      display: inline-flex;
+      align-items: center;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: rgba(243, 236, 223, 0.9);
+      color: var(--ink);
+      font-size: 11px;
+    }
+    .inline-composer {
+      margin-top: 10px;
+      display: grid;
+      gap: 8px;
+      padding-top: 10px;
+      border-top: 1px solid var(--line);
+    }
+    textarea {
+      width: 100%;
+      min-height: 96px;
+      resize: vertical;
+      border-radius: 18px;
+      border: 1px solid rgba(109, 93, 63, 0.18);
+      background: rgba(255,255,255,0.96);
+      color: var(--text);
+      padding: 12px 14px;
+    }
+    .inline-composer textarea { min-height: 74px; }
+    .composer {
+      display: grid;
+      gap: 10px;
+    }
+    .detail-rail {
+      padding: 18px;
+      gap: 12px;
+    }
+    .detail-scroll {
+      padding: 0;
+    }
+    .detail-card {
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: rgba(255,255,255,0.74);
+      padding: 16px;
+    }
+    .detail-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .detail-stat {
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: rgba(255,255,255,0.75);
+      padding: 12px;
+    }
+    .timeline-list {
+      display: grid;
+      gap: 10px;
+    }
+    .timeline-item {
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,0.8);
+      padding: 12px 14px;
+    }
+    .timeline-item.active {
+      border-color: rgba(15, 98, 254, 0.26);
+      background: rgba(239, 244, 255, 0.94);
+    }
+    pre {
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: "IBM Plex Mono", monospace;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .empty {
+      padding: 30px;
+      text-align: center;
+      color: var(--muted);
+    }
+    @keyframes card-in {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    @media (max-width: 1460px) {
+      .shell { grid-template-columns: 330px minmax(0, 1fr); }
+      .detail-rail { grid-column: 1 / -1; min-height: 360px; }
+    }
+    @media (max-width: 960px) {
+      .shell { grid-template-columns: 1fr; }
+      .status-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .topbar { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside class="panel left-rail">
+      <div class="brand">
+        <h1>aproc</h1>
+        <p>Root-first workbench. Start a session, watch branches spawn, and intervene on nodes when needed.</p>
+      </div>
+      <div class="left-scroll">
+        <section class="section">
+          <h2>New Session</h2>
+          <div class="meta">Create a root request and keep steering it from the same session.</div>
+          <form class="composer" id="new-session-form" style="margin-top:12px">
+            <textarea name="request" placeholder="Ask for a new task, investigation, or implementation."></textarea>
+            <button type="submit" class="primary">Create session</button>
+          </form>
+        </section>
+
+        <section class="section">
+          <h2>Sessions</h2>
+          <div class="session-list" id="session-list"></div>
+        </section>
+
+        <section class="section">
+          <div class="node-top" style="margin-bottom:8px">
+            <div>
+              <h2 style="margin:0">Root Conversation</h2>
+              <div class="meta" id="root-phase-line">No session selected.</div>
+            </div>
+            <div id="root-phase-badge"></div>
+          </div>
+          <div class="root-stream" id="root-stream"></div>
+        </section>
+
+        <section class="section" id="root-composer-shell">
+          <h2>Talk To Root</h2>
+          <div class="meta">This is the main orchestration channel. Use node cards for branch-local interventions.</div>
+        </section>
+      </div>
+    </aside>
+
+    <main class="panel workspace">
+      <div class="topbar">
+        <div>
+          <h2 id="session-title">Loading</h2>
+          <div class="meta" id="session-summary"></div>
+        </div>
+        <div class="toggle">
+          <button data-view="session" class="active">Session</button>
+          <button data-view="topology">Topology</button>
+        </div>
+      </div>
+      <div class="workspace-body" id="workspace-body"></div>
+    </main>
+
+    <aside class="panel detail-rail">
+      <div>
+        <h3 id="detail-title" style="margin:0 0 6px;font-size:18px">Select a node</h3>
+        <div class="meta" id="detail-subtitle">Summary-first detail</div>
+      </div>
+      <div class="tabbar">
+        <button data-tab="summary" class="active">Summary</button>
+        <button data-tab="history">History</button>
+        <button data-tab="evidence">Evidence</button>
+        <button data-tab="logs">Logs</button>
+        <button data-tab="controls">Controls</button>
+      </div>
+      <div class="detail-scroll" id="detail-body"></div>
+    </aside>
+  </div>
+
+  <script>
+    const state = {
+      sessions: [],
+      currentSessionId: null,
+      currentSession: null,
+      currentTimeline: [],
+      currentDetail: null,
+      currentView: 'session',
+      currentTab: 'summary',
+      inlineComposerNodeId: null,
+      inlineDrafts: {},
+      camera: {
+        session: { scale: 1, x: 0, y: 0 },
+        topology: { scale: 1, x: 0, y: 0 }
+      }
+    };
+
+    const qs = (selector, root = document) => root.querySelector(selector);
+    const qsa = (selector, root = document) => Array.from(root.querySelectorAll(selector));
+
+    function esc(text) {
+      const div = document.createElement('div');
+      div.textContent = text || '';
+      return div.innerHTML;
+    }
+
+    function humanize(value) {
+      return (value || 'unknown')
+        .replace(/[-_]+/g, ' ')
+        .replace(/\b\w/g, c => c.toUpperCase());
+    }
+
+    function badge(status, label) {
+      const cls = (status || '').toLowerCase().replace(/\s+/g, '-');
+      return `<span class="badge ${cls}">${esc(label || humanize(status || 'unknown'))}</span>`;
+    }
+
+    function stageFor(model) {
+      return model?.stage || model?.status || 'planned';
+    }
+
+    function stageStrip(stage) {
+      const cls = (stage || 'planned').toLowerCase();
+      return `<div class="stage-strip ${esc(cls)}"><div></div></div>`;
+    }
+
+    function currentCamera() {
+      return state.camera[state.currentView];
+    }
+
+    function formatTime(value) {
+      if (!value) return '';
+      return value.replace('T', ' ').replace('Z', ' UTC');
+    }
+
+    function summarizeNext(model) {
+      if (model?.next_application) return model.next_application;
+      if ((model?.pending_count || 0) > 0) return 'Pending branch-local intervention';
+      return '';
+    }
+
+    async function fetchJSON(url, options) {
+      const res = await fetch(url, options);
+      if (!res.ok) throw new Error(await res.text() || res.statusText);
+      return res.json();
+    }
+
+    async function loadSessions(preserveDetail = true) {
+      state.sessions = await fetchJSON('/api/work-sessions');
+      if (!state.currentSessionId && state.sessions[0]) state.currentSessionId = state.sessions[0].id;
+      renderSessionList();
+      bindNewSessionForm();
+      if (state.currentSessionId) {
+        await loadSessionDetail(state.currentSessionId, preserveDetail);
+      } else {
+        qs('#workspace-body').innerHTML = '<div class="empty">No work sessions yet.</div>';
+        qs('#root-stream').innerHTML = '<div class="empty">Create a root session to begin.</div>';
+        qs('#root-composer-shell').innerHTML = '<h2>Talk To Root</h2><div class="meta">Create a session first.</div>';
+      }
+    }
+
+    async function loadSessionDetail(id, preserveDetail = true) {
+      const previousNodeId = preserveDetail && state.currentDetail ? state.currentDetail.nodeId : null;
+      state.currentSession = await fetchJSON(`/api/work-sessions/${encodeURIComponent(id)}`);
+      state.currentTimeline = state.currentSession.timeline || await fetchJSON(`/api/work-sessions/${encodeURIComponent(id)}/timeline`);
+      state.currentSessionId = id;
+      qs('#session-title').textContent = state.currentSession.session.title;
+      qs('#session-summary').textContent = state.currentSession.session.summary;
+      renderSessionList();
+      renderLeftRail();
+      renderWorkspace();
+      const nextNodeId = previousNodeId || `request:${id}`;
+      const model = resolveNode(nextNodeId) || state.currentSession.session;
+      await selectNode(nextNodeId, model);
+    }
+
+    function renderSessionList() {
+      const root = qs('#session-list');
+      if (!state.sessions.length) {
+        root.innerHTML = '<div class="empty">No sessions yet.</div>';
+        return;
+      }
+      root.innerHTML = state.sessions.map(item => `
+        <article class="session-card ${item.id === state.currentSessionId ? 'active' : ''}" data-session-id="${esc(item.id)}">
+          <h3>${esc(item.title)}</h3>
+          <div class="node-top" style="margin-bottom:6px">
+            ${badge(item.status)}
+            <span class="meta">${item.task_count} branches</span>
+          </div>
+          <div class="meta">${esc(item.summary || '')}</div>
+        </article>
+      `).join('');
+      qsa('.session-card').forEach(card => {
+        card.onclick = () => loadSessionDetail(card.dataset.sessionId, false);
+      });
+    }
+
+    function renderLeftRail() {
+      if (!state.currentSession) return;
+      const session = state.currentSession.session;
+      qs('#root-phase-line').textContent = `${humanize(session.stage || session.status)} · ${session.last_activity || session.summary || ''}`;
+      qs('#root-phase-badge').innerHTML = badge(session.stage || session.status);
+      qs('#root-stream').innerHTML = renderRootConversation(session);
+      qs('#root-composer-shell').innerHTML = `
+        <h2>Talk To Root</h2>
+        <div class="meta">Keep steering the session here. Branch cards are for local interventions.</div>
+        <form class="composer" id="root-composer-form" style="margin-top:12px">
+          <textarea name="message" placeholder="Add direction, answer clarification, or refine the root goal."></textarea>
+          <button type="submit" class="primary">Send to root</button>
+        </form>
+      `;
+
+      bindNewSessionForm();
+
+      const rootComposer = qs('#root-composer-form');
+      rootComposer.onsubmit = async event => {
+        event.preventDefault();
+        const form = new FormData(rootComposer);
+        const message = (form.get('message') || '').toString().trim();
+        if (!message) return;
+        await fetchJSON(`/api/nodes/${encodeURIComponent(`request:${state.currentSessionId}`)}/message`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message })
+        });
+        rootComposer.reset();
+        await loadSessionDetail(state.currentSessionId, true);
+      };
+    }
+
+    function bindNewSessionForm() {
+      const newSessionForm = qs('#new-session-form');
+      if (!newSessionForm) return;
+      newSessionForm.onsubmit = async event => {
+        event.preventDefault();
+        const form = new FormData(newSessionForm);
+        const request = (form.get('request') || '').toString().trim();
+        if (!request) return;
+        const created = await fetchJSON('/api/work-sessions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ request })
+        });
+        newSessionForm.reset();
+        state.currentSessionId = created.request_id;
+        state.currentDetail = null;
+        state.inlineComposerNodeId = null;
+        await loadSessions(false);
+      };
+    }
+
+    function renderRootConversation(session) {
+      const items = [];
+      if (session.original_text) {
+        items.push({
+          role: 'user',
+          title: 'Root request',
+          body: session.original_text,
+          meta: 'Session start'
+        });
+      }
+
+      if ((session.questions || []).length) {
+        const unanswered = session.questions.slice((session.answers || []).length);
+        items.push({
+          role: unanswered.length ? 'system' : 'operator',
+          title: unanswered.length ? 'Needs input' : 'Clarification handled',
+          body: unanswered.length ? unanswered.join('\n') : session.questions.join('\n'),
+          meta: unanswered.length ? 'Waiting for root reply' : 'Clarification answered'
+        });
+      }
+
+      const messages = [...(session.messages || [])].sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''));
+      messages.forEach(message => {
+        items.push({
+          role: 'operator',
+          title: message.action === 'control' ? 'Root control' : 'Root message',
+          body: message.message || message.command || '',
+          meta: formatTime(message.created_at) || humanize(message.status)
+        });
+      });
+
+      if (!items.length) return '<div class="empty">No root conversation yet.</div>';
+      return items.map(item => `
+        <article class="chat-item ${esc(item.role)}">
+          <div class="chat-head">
+            <strong>${esc(item.title)}</strong>
+            <span class="meta">${esc(item.meta || '')}</span>
+          </div>
+          ${item.body.includes('\n') ? `<ul class="bullet-list">${item.body.split('\n').filter(Boolean).map(line => `<li>${esc(line)}</li>`).join('')}</ul>` : `<div class="chat-body">${esc(item.body)}</div>`}
+        </article>
+      `).join('');
+    }
+
+    function renderWorkspace() {
+      if (!state.currentSession) return;
+      const body = qs('#workspace-body');
+      body.innerHTML = `
+        <section class="canvas-shell">
+          ${renderStatusStrip()}
+          <div class="canvas-header">
+            <div>
+              <strong>${state.currentView === 'session' ? 'Root Session Canvas' : 'Topology Canvas'}</strong>
+              <div class="meta">${state.currentView === 'session' ? 'Conversation on the left, branching work in the center, intervention on each node when needed.' : 'Secondary operator view for request, task, and run lineage.'}</div>
+            </div>
+            <div class="canvas-tools">
+              <button data-canvas-action="zoom-out">-</button>
+              <button data-canvas-action="zoom-in">+</button>
+              <button data-canvas-action="fit" class="active">Fit</button>
+              <span class="meta">${Math.round(currentCamera().scale * 100)}%</span>
+            </div>
+          </div>
+          ${renderCanvas(state.currentView)}
+        </section>
+      `;
+      bindWorkspace();
+      attachCanvasInteractions();
+      updateCanvasTransform();
+    }
+
+    function renderStatusStrip() {
+      const session = state.currentSession.session;
+      const tasks = state.currentSession.tasks || [];
+      const running = tasks.filter(task => stageFor(task) === 'running').length;
+      const pendingInput = [session, ...tasks].filter(item => stageFor(item) === 'needs-input').length;
+      const branches = tasks.length;
+      return `
+        <div class="status-strip">
+          <article class="status-chip">
+            <strong>${humanize(session.stage || session.status)}</strong>
+            <div class="meta">Root phase</div>
+          </article>
+          <article class="status-chip">
+            <strong>${branches}</strong>
+            <div class="meta">Visible branches</div>
+          </article>
+          <article class="status-chip">
+            <strong>${running}</strong>
+            <div class="meta">Running branches</div>
+          </article>
+          <article class="status-chip">
+            <strong>${pendingInput}</strong>
+            <div class="meta">Need input</div>
+          </article>
+        </div>
+      `;
+    }
+
+    function renderCanvas(view) {
+      const graph = view === 'session' ? buildSessionGraph(state.currentSession) : buildTopologyGraph(state.currentSession);
+      return `
+        <div class="canvas-stage" id="canvas-stage" data-view="${view}">
+          <div class="canvas-world" id="canvas-world">
+            <svg class="edge-layer" viewBox="0 0 1900 1400" preserveAspectRatio="none">
+              ${graph.edges.map(edge => renderEdge(graph.positions[edge.from], graph.positions[edge.to])).join('')}
+            </svg>
+            ${(graph.lanes || []).map(lane => `<div class="lane-label" style="top:${lane.y}px">${esc(lane.label)}</div>`).join('')}
+            ${graph.nodes.map(node => renderNodeCard(node, graph.positions[node.id])).join('')}
+          </div>
+        </div>
+      `;
+    }
+
+    function renderEdge(from, to) {
+      if (!from || !to) return '';
+      const startX = from.x + from.width / 2;
+      const startY = from.y + from.height;
+      const endX = to.x + to.width / 2;
+      const endY = to.y;
+      const controlY = (startY + endY) / 2;
+      return `<path class="edge-line" d="M ${startX} ${startY} C ${startX} ${controlY}, ${endX} ${controlY}, ${endX} ${endY}"></path>`;
+    }
+
+    function renderNodeCard(node, pos) {
+      if (!pos) return '';
+      const model = resolveNode(node.id) || {};
+      const stage = stageFor(model);
+      const selected = state.currentDetail && state.currentDetail.nodeId === node.id;
+      const description = node.kind === 'request'
+        ? (model.summary || model.original_text || '')
+        : node.kind === 'task'
+          ? `${model.role || 'role?'}${model.assigned_to ? ` · ${model.assigned_to}` : ''}`
+          : coalesce(model.finished_at, model.started_at, model.status);
+      const chips = [];
+      if ((model.pending_count || 0) > 0) chips.push(`${model.pending_count} pending`);
+      if (model.needs_input) chips.push('Needs root input');
+      if (summarizeNext(model)) chips.push(summarizeNext(model));
+      if (model.latest_event) chips.push(model.latest_event);
+      const controls = (model.available_controls || []).filter(control => control !== 'message').slice(0, 2);
+
+      return `
+        <article class="node-card ${node.kind === 'request' ? 'root' : ''} ${selected ? 'selected' : ''}" data-node-id="${esc(node.id)}" style="left:${pos.x}px; top:${pos.y}px; width:${pos.width}px">
+          <div class="node-top">
+            <div>
+              <div class="meta">${esc(node.kind)}</div>
+              <h3>${esc(node.label)}</h3>
+            </div>
+            ${badge(stage)}
+          </div>
+          ${stageStrip(stage)}
+          <div class="node-subtitle">${esc(coalesce(model.last_activity, description, model.summary, model.status))}</div>
+          <div class="node-chips">
+            ${chips.map(chip => `<span class="mini-chip">${esc(chip)}</span>`).join('')}
+          </div>
+          ${node.kind !== 'request' ? `
+            <div class="inline-actions">
+              <button data-inline-reply="${esc(node.id)}" class="primary">Quick reply</button>
+              ${controls.map(control => `<button data-inline-control="${esc(control)}" data-node-id="${esc(node.id)}">${esc(humanize(control))}</button>`).join('')}
+            </div>
+            ${state.inlineComposerNodeId === node.id ? `
+              <form class="inline-composer" data-inline-form="${esc(node.id)}">
+                <textarea name="message" placeholder="Send branch-local intervention."></textarea>
+                <div class="node-top">
+                  <span class="meta">${esc(node.id)}</span>
+                  <button type="submit" class="primary">Send</button>
+                </div>
+              </form>
+            ` : ''}
+          ` : `
+            <div class="inline-actions">
+              <button data-focus-root class="primary">Focus root</button>
+            </div>
+          `}
+        </article>
+      `;
+    }
+
+    function buildSessionGraph(detail) {
+      const nodes = [];
+      const edges = [];
+      const positions = {};
+      const lanes = [
+        { label: 'Root', y: 28 },
+        { label: 'Branches', y: 230 },
+        { label: 'Runs', y: 470 }
+      ];
+      const session = detail.session;
+      const rootId = `request:${session.id}`;
+      nodes.push({ id: rootId, kind: 'request', label: 'Root Session', status: session.status });
+      positions[rootId] = { x: 760, y: 70, width: 300, height: 220 };
+
+      const tasks = detail.tasks || [];
+      tasks.forEach((task, taskIndex) => {
+        const x = 180 + taskIndex * 300;
+        const taskId = `task:${task.id}`;
+        nodes.push({ id: taskId, kind: 'task', label: task.title, status: task.status });
+        positions[taskId] = { x, y: 270, width: 250, height: 230 };
+        edges.push({ from: rootId, to: taskId });
+
+        (task.runs || []).forEach((run, runIndex) => {
+          const runId = `run:${run.id}`;
+          nodes.push({ id: runId, kind: 'run', label: run.id, status: run.status });
+          positions[runId] = { x, y: 530 + runIndex * 190, width: 240, height: 210 };
+          edges.push({ from: taskId, to: runId });
+        });
+      });
+      return { nodes, edges, positions, lanes };
+    }
+
+    function buildTopologyGraph(detail) {
+      const nodes = (detail.topology.nodes || []).map(node => ({ ...node }));
+      const edges = detail.topology.edges || [];
+      const positions = {};
+      const lanes = [
+        { label: 'Request', y: 28 },
+        { label: 'Tasks', y: 230 },
+        { label: 'Runs', y: 470 }
+      ];
+
+      nodes.filter(node => node.kind === 'request').forEach((node, index) => {
+        positions[node.id] = { x: 760 + index * 280, y: 70, width: 300, height: 220 };
+      });
+      nodes.filter(node => node.kind === 'task').forEach((node, index) => {
+        positions[node.id] = { x: 170 + index * 280, y: 270, width: 250, height: 220 };
+      });
+      nodes.filter(node => node.kind === 'run').forEach((node, index) => {
+        const col = index % 4;
+        const row = Math.floor(index / 4);
+        positions[node.id] = { x: 170 + col * 280, y: 530 + row * 190, width: 240, height: 200 };
+      });
+      return { nodes, edges, positions, lanes };
+    }
+
+    function bindWorkspace() {
+      qsa('[data-view]').forEach(button => {
+        button.onclick = () => {
+          state.currentView = button.dataset.view;
+          qsa('[data-view]').forEach(item => item.classList.toggle('active', item === button));
+          renderWorkspace();
+        };
+      });
+
+      qsa('[data-node-id]').forEach(node => {
+        if (node.classList.contains('node-card')) {
+          node.onclick = async event => {
+            if (event.target.closest('button') || event.target.closest('form')) return;
+            const model = resolveNode(node.dataset.nodeId);
+            if (model) await selectNode(node.dataset.nodeId, model);
+          };
+        }
+      });
+
+      qsa('[data-inline-reply]').forEach(button => {
+        button.onclick = async event => {
+          event.stopPropagation();
+          state.inlineComposerNodeId = state.inlineComposerNodeId === button.dataset.inlineReply ? null : button.dataset.inlineReply;
+          renderWorkspace();
+        };
+      });
+
+      qsa('[data-inline-form]').forEach(form => {
+        form.onsubmit = async event => {
+          event.preventDefault();
+          event.stopPropagation();
+          const body = new FormData(form);
+          const message = (body.get('message') || '').toString().trim();
+          if (!message) return;
+          await fetchJSON(`/api/nodes/${encodeURIComponent(form.dataset.inlineForm)}/message`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message })
+          });
+          state.inlineComposerNodeId = null;
+          await loadSessionDetail(state.currentSessionId, true);
+        };
+      });
+
+      qsa('[data-inline-control]').forEach(button => {
+        button.onclick = async event => {
+          event.stopPropagation();
+          await fetchJSON(`/api/nodes/${encodeURIComponent(button.dataset.nodeId)}/control`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ command: button.dataset.inlineControl })
+          });
+          await loadSessionDetail(state.currentSessionId, true);
+        };
+      });
+
+      const focusRoot = qs('[data-focus-root]');
+      if (focusRoot) {
+        focusRoot.onclick = async event => {
+          event.stopPropagation();
+          await selectNode(`request:${state.currentSessionId}`, state.currentSession.session);
+          currentCamera().x = 0;
+          currentCamera().y = 0;
+          currentCamera().scale = 1;
+          updateCanvasTransform();
+        };
+      }
+
+      qsa('[data-canvas-action]').forEach(button => {
+        button.onclick = () => {
+          const camera = currentCamera();
+          if (button.dataset.canvasAction === 'zoom-in') camera.scale = Math.min(2.2, camera.scale + 0.12);
+          if (button.dataset.canvasAction === 'zoom-out') camera.scale = Math.max(0.45, camera.scale - 0.12);
+          if (button.dataset.canvasAction === 'fit') {
+            camera.scale = 0.88;
+            camera.x = 0;
+            camera.y = 0;
+          }
+          updateCanvasTransform();
+          renderWorkspace();
+        };
+      });
+    }
+
+    function attachCanvasInteractions() {
+      const stage = qs('#canvas-stage');
+      const world = qs('#canvas-world');
+      if (!stage || !world) return;
+
+      let dragging = false;
+      let startX = 0;
+      let startY = 0;
+      let baseX = 0;
+      let baseY = 0;
+
+      stage.onpointerdown = event => {
+        if (event.target.closest('.node-card')) return;
+        dragging = true;
+        stage.classList.add('grabbing');
+        startX = event.clientX;
+        startY = event.clientY;
+        baseX = currentCamera().x;
+        baseY = currentCamera().y;
+      };
+
+      window.onpointermove = event => {
+        if (!dragging) return;
+        const camera = currentCamera();
+        camera.x = baseX + (event.clientX - startX);
+        camera.y = baseY + (event.clientY - startY);
+        updateCanvasTransform();
+      };
+
+      window.onpointerup = () => {
+        dragging = false;
+        if (stage) stage.classList.remove('grabbing');
+      };
+
+      stage.onwheel = event => {
+        event.preventDefault();
+        const delta = event.deltaY < 0 ? 0.08 : -0.08;
+        const camera = currentCamera();
+        camera.scale = Math.max(0.45, Math.min(2.2, camera.scale + delta));
+        updateCanvasTransform();
+        renderWorkspace();
+      };
+    }
+
+    function updateCanvasTransform() {
+      const world = qs('#canvas-world');
+      if (!world) return;
+      const camera = currentCamera();
+      world.style.transform = `translate(${camera.x}px, ${camera.y}px) scale(${camera.scale})`;
+    }
+
+    function resolveNode(nodeId) {
+      if (!state.currentSession) return null;
+      const [kind, rawId] = nodeId.split(':');
+      if (kind === 'request') return state.currentSession.session;
+      if (kind === 'task') return (state.currentSession.tasks || []).find(task => task.id === rawId);
+      if (kind === 'run') {
+        for (const task of state.currentSession.tasks || []) {
+          const run = (task.runs || []).find(item => item.id === rawId);
+          if (run) return run;
+        }
+      }
+      return null;
+    }
+
+    function labelForNode(nodeId) {
+      const model = resolveNode(nodeId);
+      if (!model) return nodeId;
+      if (nodeId.startsWith('request:')) return 'Root Session';
+      return model.title || model.id || nodeId;
+    }
+
+    async function selectNode(nodeId, model) {
+      state.currentDetail = { nodeId, model };
+      qs('#detail-title').textContent = labelForNode(nodeId);
+      qs('#detail-subtitle').textContent = `${humanize(stageFor(model))} · ${model.last_activity || model.summary || model.status || ''}`;
+      renderWorkspace();
+      await renderDetail();
+    }
+
+    async function renderDetail() {
+      const root = qs('#detail-body');
+      const selected = state.currentDetail;
+      if (!selected) {
+        root.innerHTML = '<div class="empty">Select a branch from the canvas.</div>';
+        return;
+      }
+
+      const { nodeId, model } = selected;
+      const [kind, rawId] = nodeId.split(':');
+      if (state.currentTab === 'summary') {
+        root.innerHTML = renderDetailSummary(nodeId, model);
+        return;
+      }
+
+      if (state.currentTab === 'history') {
+        root.innerHTML = renderDetailHistory(nodeId);
+        qsa('[data-history-node]', root).forEach(item => {
+          item.onclick = async () => {
+            const nextNodeId = item.dataset.historyNode;
+            const nextModel = resolveNode(nextNodeId) || state.currentSession.session;
+            await selectNode(nextNodeId, nextModel);
+          };
+        });
+        return;
+      }
+
+      if (state.currentTab === 'evidence') {
+        if (kind !== 'run') {
+          root.innerHTML = '<div class="empty">Evidence is attached to run nodes.</div>';
+          return;
+        }
+        const evidence = await fetchJSON(`/api/runs/${encodeURIComponent(rawId)}/evidence`);
+        root.innerHTML = `<article class="detail-card"><h3 style="margin:0 0 10px">Evidence</h3><pre>${esc(JSON.stringify(evidence, null, 2))}</pre></article>`;
+        return;
+      }
+
+      if (state.currentTab === 'logs') {
+        if (kind !== 'run') {
+          root.innerHTML = '<div class="empty">Logs are attached to run nodes.</div>';
+          return;
+        }
+        const logs = await fetchJSON(`/api/runs/${encodeURIComponent(rawId)}/logs?stream=stdout&tail=180`);
+        root.innerHTML = `<article class="detail-card"><h3 style="margin:0 0 10px">Logs</h3><pre>${esc((logs.lines || []).join('\n'))}</pre></article>`;
+        return;
+      }
+
+      root.innerHTML = renderDetailControls(nodeId, model);
+      const form = qs('#detail-message-form');
+      if (form) {
+        form.onsubmit = async event => {
+          event.preventDefault();
+          const body = new FormData(form);
+          const message = (body.get('message') || '').toString().trim();
+          if (!message) return;
+          await fetchJSON(`/api/nodes/${encodeURIComponent(nodeId)}/message`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message })
+          });
+          await loadSessionDetail(state.currentSessionId, true);
+        };
+      }
+      qsa('[data-control]', root).forEach(button => {
+        button.onclick = async () => {
+          await fetchJSON(`/api/nodes/${encodeURIComponent(nodeId)}/control`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ command: button.dataset.control })
+          });
+          await loadSessionDetail(state.currentSessionId, true);
+        };
+      });
+    }
+
+    function renderDetailSummary(nodeId, model) {
+      const stats = [
+        ['Stage', humanize(stageFor(model))],
+        ['Status', humanize(model.status || '')],
+        ['Pending', String(model.pending_count || 0)],
+        ['Latest', model.latest_event || 'No recent event'],
+        ['Activity', model.last_activity || model.summary || 'No activity yet'],
+        ['Next application', summarizeNext(model) || 'None']
+      ];
+
+      let extra = '';
+      if (nodeId.startsWith('request:')) {
+        extra = `
+          <article class="detail-card">
+            <h3 style="margin:0 0 10px">Root state</h3>
+            <div class="meta">${esc(model.summary || '')}</div>
+            ${(model.questions || []).length ? `
+              <div style="margin-top:12px">
+                <strong style="font-size:13px">Clarifications</strong>
+                <ul class="bullet-list">
+                  ${(model.questions || []).map((question, index) => `<li>${esc(question)}${model.answers && model.answers[index] ? ` -> ${esc(model.answers[index])}` : ''}</li>`).join('')}
+                </ul>
+              </div>
+            ` : ''}
+          </article>
+        `;
+      } else if (nodeId.startsWith('task:')) {
+        extra = `
+          <article class="detail-card">
+            <h3 style="margin:0 0 10px">Branch details</h3>
+            <div class="meta">${esc(model.role || 'No role')} ${model.assigned_to ? `· ${esc(model.assigned_to)}` : ''}</div>
+            <pre style="margin-top:10px">${esc(model.input || 'No task input captured.')}</pre>
+          </article>
+        `;
+      } else {
+        extra = `
+          <article class="detail-card">
+            <h3 style="margin:0 0 10px">Run details</h3>
+            <div class="meta">Started: ${esc(formatTime(model.started_at) || 'n/a')}</div>
+            <div class="meta">Finished: ${esc(formatTime(model.finished_at) || 'n/a')}</div>
+            ${model.error ? `<pre style="margin-top:10px">${esc(model.error)}</pre>` : ''}
+          </article>
+        `;
+      }
+
+      return `
+        <article class="detail-card">
+          <h3 style="margin:0 0 12px">Summary</h3>
+          <div class="detail-grid">
+            ${stats.map(([label, value]) => `<div class="detail-stat"><div class="meta">${esc(label)}</div><strong style="display:block;margin-top:6px;font-size:14px">${esc(value)}</strong></div>`).join('')}
+          </div>
+        </article>
+        ${extra}
+      `;
+    }
+
+    function renderDetailHistory(nodeId) {
+      const events = (state.currentTimeline || []).filter(item => item.node_ref === nodeId || (nodeId.startsWith('request:') && item.node_type === 'request'));
+      if (!events.length) return '<div class="empty">No history for this node yet.</div>';
+      return `
+        <article class="detail-card">
+          <h3 style="margin:0 0 12px">Node History</h3>
+          <div class="timeline-list">
+            ${events.map(item => `
+              <article class="timeline-item active" data-history-node="${esc(item.node_ref)}">
+                <div class="node-top">
+                  <strong>${esc(item.title)}</strong>
+                  ${badge(item.status)}
+                </div>
+                <div class="meta">${esc(formatTime(item.created_at))}</div>
+                <div class="meta">${item.consumed_by_run_id ? `Consumed by ${esc(item.consumed_by_run_id)}` : ''}</div>
+              </article>
+            `).join('')}
+          </div>
+        </article>
+      `;
+    }
+
+    function renderDetailControls(nodeId, model) {
+      const controls = (model.available_controls || []).filter(item => item !== 'message');
+      return `
+        <article class="detail-card">
+          <h3 style="margin:0 0 10px">Direct Control</h3>
+          <div class="meta">Use this for longer interventions or explicit branch control.</div>
+          <form class="composer" id="detail-message-form" style="margin-top:12px">
+            <textarea name="message" placeholder="Send a longer message to ${esc(labelForNode(nodeId))}."></textarea>
+            <button type="submit" class="primary">Send message</button>
+          </form>
+          <div class="detail-actions" style="margin-top:12px">
+            ${controls.map(control => `<button data-control="${esc(control)}" class="primary">${esc(humanize(control))}</button>`).join('') || '<span class="muted">No control actions available.</span>'}
+          </div>
+        </article>
+      `;
+    }
+
+    function coalesce(...values) {
+      return values.find(value => value && String(value).trim()) || '';
+    }
+
+    qsa('[data-tab]').forEach(button => {
+      button.onclick = async () => {
+        state.currentTab = button.dataset.tab;
+        qsa('[data-tab]').forEach(item => item.classList.toggle('active', item === button));
+        await renderDetail();
+      };
+    });
+
+    setInterval(async () => {
+      if (!state.currentSessionId) return;
+      try {
+        await loadSessionDetail(state.currentSessionId, true);
+      } catch (_) {}
+    }, 3000);
+
+    loadSessions(false).catch(err => {
+      qs('#workspace-body').innerHTML = `<div class="empty">${esc(err.message)}</div>`;
+    });
+  </script>
+</body>
+</html>

@@ -1,8 +1,8 @@
-# claude-code
+# opencode
 
 ## agentic
 ```
-claude --dangerously-skip-permissions -p "{prompt}" < /dev/null
+opencode run "{prompt}" < /dev/null
 ```
 
 ## context

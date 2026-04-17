@@ -230,3 +230,36 @@ func newRunSummary(runID, taskID, taskPath, stdoutPath, stderrPath string, start
 		},
 	}
 }
+
+func loadRunSummaryByRunID(paths *RuntimePaths, taskID string) (*RunSummary, string, error) {
+	completedDir := paths.CompletedRunsDir()
+	entries, err := os.ReadDir(completedDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, "", fmt.Errorf("no completed runs found")
+		}
+		return nil, "", fmt.Errorf("read completed runs dir: %w", err)
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		if strings.Contains(entry.Name(), taskID) {
+			runID := entry.Name()
+			summaryPath := filepath.Join(completedDir, runID, "summary.json")
+			data, err := os.ReadFile(summaryPath)
+			if err != nil {
+				continue
+			}
+
+			var summary RunSummary
+			if err := json.Unmarshal(data, &summary); err != nil {
+				continue
+			}
+			return &summary, summaryPath, nil
+		}
+	}
+
+	return nil, "", fmt.Errorf("no completed run found for task %s", taskID)
+}

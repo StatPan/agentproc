@@ -48,6 +48,22 @@ func run(args []string) error {
 			return runResultCommand(args[1:])
 		case "tail":
 			return runTailCommand(args[1:])
+		case "request":
+			return runRequestCommand(args[1:])
+		case "status":
+			return runStatusCommand(args[1:])
+		case "answer":
+			return runAnswerCommand(args[1:])
+		case "inspect":
+			return runInspectCommand(args[1:])
+		case "logs":
+			return runLogsCommand(args[1:])
+		case "debug":
+			return runDebugCommand(args[1:])
+		case "list":
+			return runListCommand(args[1:])
+		case "init":
+			return runInitCommand(args[1:])
 		}
 	}
 
@@ -65,7 +81,7 @@ func looksLikeDirectRequest(args []string) bool {
 	if strings.HasPrefix(args[0], "-") {
 		return false
 	}
-	return !slices.Contains([]string{"serve", "dispatch", "intake", "reply", "result", "tail"}, args[0])
+	return !slices.Contains([]string{"serve", "dispatch", "intake", "reply", "result", "tail", "request", "status", "answer", "inspect", "logs", "debug", "list", "init"}, args[0])
 }
 
 func runLegacyCommand(args []string) error {
@@ -458,6 +474,16 @@ func claimTask(paths *RuntimePaths, task *Task) (*taskClaim, error) {
 	if err := writeRunState(paths.ActiveRunStatePath(runID), state); err != nil {
 		_ = os.RemoveAll(runDir)
 		return nil, fmt.Errorf("write claim state %s: %w", task.TaskID, err)
+	}
+	if sessionID, err := sessionIDForTask(paths, task.TaskID); err == nil && strings.TrimSpace(sessionID) != "" {
+		if err := appendCanonicalEvent(paths, sessionID, eventRunClaimed, "run", runID, runClaimedPayload{
+			RunID:     runID,
+			TaskID:    task.TaskID,
+			StartedAt: state.StartedAt,
+		}); err != nil {
+			_ = os.RemoveAll(runDir)
+			return nil, fmt.Errorf("append canonical run claim %s: %w", task.TaskID, err)
+		}
 	}
 
 	return &taskClaim{task: task, runID: runID, runDir: runDir, queuePath: queuePath}, nil

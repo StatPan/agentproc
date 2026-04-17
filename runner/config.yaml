@@ -1,8 +1,9 @@
-agentos_root: /home/statpan/workspace/agentproc
+agentos_root: /home/statpan/workspace/libs/agentproc
 layers:
   subprocess: codex
   thread: gemini
 runner:
+  hidden_runtime: true
   max_concurrent: 0
   poll_interval: 5s
   mode: daemon

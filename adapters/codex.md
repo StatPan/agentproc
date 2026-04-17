@@ -2,5 +2,5 @@
 
 ## agentic
 ```
-codex exec "{prompt}" --dangerously-bypass-approvals-and-sandbox
+codex exec "{prompt}" --dangerously-bypass-approvals-and-sandbox < /dev/null
 ```
